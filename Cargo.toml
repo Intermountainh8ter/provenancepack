@@ -1,0 +1,23 @@
+[package]
+name = "provenancepack"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "Fine-tuning data provenance via membership-inference signals: loss-ratio, min-k, and zlib-ratio with calibration against known-out documents."
+repository = "https://github.com/Intermountainh8ter/provenancepack"
+keywords = ["llm", "provenance", "membership-inference", "audit", "training-data"]
+categories = ["command-line-utilities", "science"]
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+
+[[bin]]
+name = "provenancepack"
+path = "src/main.rs"
+
+[lib]
+name = "provenancepack"
+path = "src/lib.rs"
