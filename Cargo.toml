@@ -1,6 +1,7 @@
 [package]
 name = "provenancepack"
-version = "0.0.1"
+version = "0.1.0"
+authors = ["Intermountainh8ter"]
 edition = "2021"
 license = "MIT"
 description = "Fine-tuning data provenance via membership-inference signals: loss-ratio, min-k, and zlib-ratio with calibration against known-out documents."
