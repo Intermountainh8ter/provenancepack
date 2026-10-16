@@ -7,6 +7,8 @@
 //! p-value < 0.05 (pre-reg §3). The repo refuses to publish an
 //! absolute claim when the bank has fewer than 100 documents (§4).
 
+pub mod http;
+
 use serde::{Deserialize, Serialize};
 
 /// Loss-ratio: `loss(paraphrase) / loss(original)`. Values > 1 mean the
