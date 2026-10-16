@@ -174,6 +174,93 @@ pub fn summarize_three(
     }
 }
 
+/// Drift report for a target document against its known-out bank.
+///
+/// Pre-reg §6: "Known-out documents drawn from a different distribution
+/// than the target produce a false positive. We report the drift
+/// metric (length and vocabulary KL) between target and bank for
+/// every result."
+///
+/// This struct is a *descriptor* for the drift between the target
+/// and the bank; the auditor publishes it alongside the verdict so a
+/// reviewer can judge whether the known-out comparison is apples-to-
+/// apples. The signal p-values do not change — the drift just makes
+/// explicit what the comparison was between.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct BankDrift {
+    pub target_tokens: usize,
+    pub bank_mean_tokens: f64,
+    /// `|target_tokens - bank_mean_tokens| / bank_mean_tokens`. 0 is
+    /// an exact length match; a value above 0.5 is a 50% length drift.
+    pub length_drift_rel: f64,
+    /// Vocabulary KL(target || bank) in nats, over the union of the
+    /// two documents' token vocabularies (word-level by default).
+    /// Add-one smoothing against the union keeps the KL finite when a
+    /// target token is absent from the bank.
+    pub vocab_kl_nats: f64,
+}
+
+fn word_counts(text: &str) -> std::collections::BTreeMap<String, u64> {
+    let mut m = std::collections::BTreeMap::new();
+    for w in text.split_whitespace() {
+        *m.entry(w.to_lowercase()).or_insert(0) += 1;
+    }
+    m
+}
+
+/// Compute the §6 drift metrics between the target document and its
+/// known-out bank. The bank is passed as a vector of document strings;
+/// their words are pooled for the bank side.
+pub fn bank_drift(target_text: &str, bank_texts: &[String]) -> BankDrift {
+    let target_tokens: usize = target_text.split_whitespace().count();
+    let bank_mean_tokens = if bank_texts.is_empty() {
+        0.0
+    } else {
+        bank_texts
+            .iter()
+            .map(|t| t.split_whitespace().count() as f64)
+            .sum::<f64>()
+            / bank_texts.len() as f64
+    };
+    let length_drift_rel = if bank_mean_tokens > 0.0 {
+        (target_tokens as f64 - bank_mean_tokens).abs() / bank_mean_tokens
+    } else {
+        f64::NAN
+    };
+
+    // Vocabulary KL(target || bank) with add-one smoothing over the
+    // union vocabulary. Add-one keeps the KL finite when the target
+    // emits a token the bank never does.
+    let t_counts = word_counts(target_text);
+    let mut b_counts = std::collections::BTreeMap::new();
+    for doc in bank_texts {
+        for (k, v) in word_counts(doc) {
+            *b_counts.entry(k).or_insert(0u64) += v;
+        }
+    }
+    let mut vocab: std::collections::BTreeSet<&String> = t_counts.keys().collect();
+    vocab.extend(b_counts.keys());
+    let v = vocab.len() as f64;
+    let t_total = t_counts.values().sum::<u64>() as f64 + v;
+    let b_total = b_counts.values().sum::<u64>() as f64 + v;
+    let mut kl = 0.0;
+    if v > 0.0 && t_total > 0.0 && b_total > 0.0 {
+        for w in &vocab {
+            let p = (*t_counts.get(*w).unwrap_or(&0) as f64 + 1.0) / t_total;
+            let q = (*b_counts.get(*w).unwrap_or(&0) as f64 + 1.0) / b_total;
+            if p > 0.0 && q > 0.0 {
+                kl += p * (p / q).ln();
+            }
+        }
+    }
+    BankDrift {
+        target_tokens,
+        bank_mean_tokens,
+        length_drift_rel,
+        vocab_kl_nats: kl,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,5 +381,54 @@ mod tests {
         let j = serde_json::to_string(&s).unwrap();
         let s2: SummaryReport = serde_json::from_str(&j).unwrap();
         assert_eq!(s, s2);
+    }
+
+    #[test]
+    fn bank_drift_zero_when_target_matches_bank_mean_length() {
+        let target = "one two three four five";
+        let bank: Vec<String> = (0..10)
+            .map(|_| "alpha beta gamma delta epsilon".to_string())
+            .collect();
+        let d = bank_drift(target, &bank);
+        assert_eq!(d.target_tokens, 5);
+        assert!((d.bank_mean_tokens - 5.0).abs() < 1e-12);
+        assert!(d.length_drift_rel < 1e-12);
+    }
+
+    #[test]
+    fn bank_drift_length_signal_scales_with_mismatch() {
+        let target = "a a a a a a a a a a"; // 10 tokens
+        let bank: Vec<String> = (0..10).map(|_| "x x".to_string()).collect(); // 2 each
+        let d = bank_drift(target, &bank);
+        assert_eq!(d.target_tokens, 10);
+        assert!((d.bank_mean_tokens - 2.0).abs() < 1e-12);
+        assert!((d.length_drift_rel - 4.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn bank_drift_vocab_kl_zero_when_target_matches_bank_distribution() {
+        // Same word distribution in target and bank -> small KL.
+        let target = "cat dog cat dog";
+        let bank: Vec<String> = (0..10).map(|_| "cat dog cat dog".to_string()).collect();
+        let d = bank_drift(target, &bank);
+        assert!(d.vocab_kl_nats < 0.05, "kl={}", d.vocab_kl_nats);
+    }
+
+    #[test]
+    fn bank_drift_vocab_kl_positive_when_vocabularies_disjoint() {
+        let target = "alpha beta gamma delta";
+        let bank: Vec<String> = (0..5).map(|_| "one two three four".to_string()).collect();
+        let d = bank_drift(target, &bank);
+        assert!(d.vocab_kl_nats > 0.0, "kl={}", d.vocab_kl_nats);
+    }
+
+    #[test]
+    fn bank_drift_round_trips_through_json() {
+        let target = "hello";
+        let bank = vec!["hello world".to_string(), "world".to_string()];
+        let d = bank_drift(target, &bank);
+        let s = serde_json::to_string(&d).unwrap();
+        let d2: BankDrift = serde_json::from_str(&s).unwrap();
+        assert_eq!(d, d2);
     }
 }
