@@ -22,10 +22,18 @@ evidence; a reusable, documented tool would be cited.
 - `min_k_signal(token_log_probs, k_frac)` with the Carlini-style
   low-probability tail.
 - `zlib_ratio_signal(zlib_entropy_bits, nll_sum_nats)`
-- `likely_in(signal, threshold)` verdict.
-- `provenancepack` CLI with one subcommand per signal.
-- `docs/PREREGISTRATION.md` with the thresholds and the known-out
-  control bank requirement.
+- `likely_in(signal, threshold)` single-condition shortcut.
+- `empirical_p(target, bank)` upper-tail p-value against a known-out
+  bank: `(1 + #{bank >= target}) / (1 + N)`.
+- `MIN_BANK_SIZE = 100` constant (pre-reg §4).
+- `SignalReport` + `score_signal(signal, bank, threshold, p_cutoff)`:
+  §3's two-part flagging rule (signal >= threshold AND p < cutoff),
+  returning `LikelyIn` / `NotIn` / `BankTooSmall` (bank below 100).
+- `SummaryReport` + `summarize_three(...)`: §5's agreement count
+  across the three signals, refusing to average them into a composite.
+- CLI: one subcommand per signal (back-compat), plus `score-signal`
+  and `summary`. Exit codes on `summary`: 0 none / 1 one / 2 two or
+  three / 3 any bank too small.
 
 Not in this commit (openly tracked):
 
@@ -33,7 +41,6 @@ Not in this commit (openly tracked):
   driver that computes the three signals from a document.
 - Known-out document bank (public text known to be excluded from the
   model's training window).
-- Paired-resample FPR calibration.
 
 ## License
 
