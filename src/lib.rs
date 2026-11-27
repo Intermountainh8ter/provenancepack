@@ -71,10 +71,7 @@ pub fn empirical_p(target_signal: f64, bank_signals: &[f64]) -> f64 {
     if bank_signals.is_empty() {
         return f64::NAN;
     }
-    let as_or_above = bank_signals
-        .iter()
-        .filter(|v| **v >= target_signal)
-        .count();
+    let as_or_above = bank_signals.iter().filter(|v| **v >= target_signal).count();
     (1.0 + as_or_above as f64) / (1.0 + bank_signals.len() as f64)
 }
 
@@ -263,8 +260,83 @@ pub fn bank_drift(target_text: &str, bank_texts: &[String]) -> BankDrift {
     }
 }
 
+/// Seeded xorshift64* PRNG (no external dependency).
+pub struct Xorshift64(u64);
+
+impl Xorshift64 {
+    pub fn new(seed: u64) -> Self {
+        // splitmix-style scramble so small seeds do not start near zero.
+        let mut z = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^= z >> 31;
+        Xorshift64(if z == 0 { 1 } else { z })
+    }
+    pub fn next_f64(&mut self) -> f64 {
+        let mut x = self.0;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.0 = x;
+        (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64
+    }
+}
+
+/// Minimum number of canary hits that flags a model for a bank of size `n`.
+pub fn flag_count(n: usize, threshold_frac: f64) -> usize {
+    ((threshold_frac * n as f64) - 1e-9).ceil().max(0.0) as usize
+}
+
+/// Fraction of `trials` in which a responder hitting each of `n` canaries
+/// independently with probability `hit_rate` reaches the flag count.
+pub fn accusation_rate(
+    n: usize,
+    hit_rate: f64,
+    threshold_frac: f64,
+    trials: usize,
+    rng: &mut Xorshift64,
+) -> f64 {
+    let need = flag_count(n, threshold_frac);
+    let mut flagged = 0usize;
+    for _ in 0..trials {
+        let hits = (0..n).filter(|_| rng.next_f64() < hit_rate).count();
+        if hits >= need {
+            flagged += 1;
+        }
+    }
+    flagged as f64 / trials as f64
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn flag_count_rounds_up_without_fp_error() {
+        assert_eq!(flag_count(10, 0.2), 2);
+        assert_eq!(flag_count(100, 0.2), 20);
+        assert_eq!(flag_count(25, 0.2), 5);
+        assert_eq!(flag_count(7, 0.2), 2);
+    }
+
+    #[test]
+    fn accusation_rate_is_seeded_and_bounded() {
+        let a = accusation_rate(10, 0.05, 0.2, 500, &mut Xorshift64::new(7));
+        let b = accusation_rate(10, 0.05, 0.2, 500, &mut Xorshift64::new(7));
+        assert_eq!(a, b);
+        assert!((0.0..=1.0).contains(&a));
+    }
+
+    #[test]
+    fn always_answer_responder_is_always_accused() {
+        let r = accusation_rate(50, 1.0, 0.2, 200, &mut Xorshift64::new(1));
+        assert_eq!(r, 1.0);
+    }
+
+    #[test]
+    fn never_hit_responder_is_never_accused() {
+        let r = accusation_rate(50, 0.0, 0.2, 200, &mut Xorshift64::new(1));
+        assert_eq!(r, 0.0);
+    }
+
     use super::*;
 
     #[test]

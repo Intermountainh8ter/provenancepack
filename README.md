@@ -35,6 +35,14 @@ evidence; a reusable, documented tool would be cited.
   and `summary`. Exit codes on `summary`: 0 none / 1 one / 2 two or
   three / 3 any bank too small.
 
+- `bank-sim`: model-free seeded simulation of the false-accusation rate of
+  a known-answer canary bank against a never-trained responder (iter 745,
+  `results/745-canary-bank-fpr.json`). With chance hit rate 0.05 and a flag
+  at 20% of canaries hit, the rate is 0.08685 at bank size 10 and 0.0 at
+  bank size 100; an always-answer responder is accused at 1.0 at every
+  size. The pre-registered claim of a rate above 0.10 at size 10 is
+  refuted (0.08685); the claim of below 0.01 at size 100 holds.
+
 Not in this commit (openly tracked):
 
 - `provenancepack probe --model <endpoint> --document <path>` end-to-end

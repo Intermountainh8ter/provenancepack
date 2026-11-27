@@ -2,8 +2,8 @@
 
 use clap::{Parser, Subcommand};
 use provenancepack::{
-    likely_in, loss_ratio_signal, min_k_signal, score_signal, summarize_three, zlib_ratio_signal,
-    SignalReport,
+    accusation_rate, likely_in, loss_ratio_signal, min_k_signal, score_signal, summarize_three,
+    zlib_ratio_signal, SignalReport,
 };
 
 #[derive(Parser)]
@@ -67,6 +67,22 @@ enum Cmd {
     /// 3 any bank was too small (no absolute claim published).
     Summary {
         bundle: std::path::PathBuf,
+    },
+    /// Model-free simulation of the false-accusation rate of a canary
+    /// bank of size n against a never-trained responder.
+    BankSim {
+        #[arg(long)]
+        seed: u64,
+        #[arg(long)]
+        trials: usize,
+        #[arg(long, value_delimiter = ',')]
+        sizes: Vec<usize>,
+        #[arg(long)]
+        chance_hit: f64,
+        #[arg(long)]
+        threshold_frac: f64,
+        #[arg(long)]
+        out: std::path::PathBuf,
     },
     Version,
 }
@@ -160,7 +176,75 @@ fn main() -> anyhow::Result<()> {
                 std::process::exit(1); // single flag
             }
         }
+        Cmd::BankSim {
+            seed,
+            trials,
+            sizes,
+            chance_hit,
+            threshold_frac,
+            out,
+        } => {
+            let t0 = std::time::Instant::now();
+            let started = utc_now();
+            let mut rng = provenancepack::Xorshift64::new(seed);
+            let mut fpr = serde_json::Map::new();
+            let mut degen = serde_json::Map::new();
+            for &n in &sizes {
+                let r = accusation_rate(n, chance_hit, threshold_frac, trials, &mut rng);
+                let d = accusation_rate(n, 1.0, threshold_frac, trials, &mut rng);
+                fpr.insert(n.to_string(), r.into());
+                degen.insert(n.to_string(), d.into());
+            }
+            let argv: Vec<String> = std::env::args().skip(1).collect();
+            let doc = serde_json::json!({
+                "false_accusation_rate_by_bank_size": fpr,
+                "always_answer_accusation_rate_by_bank_size": degen,
+                "params": {"trials": trials, "sizes": sizes, "chance_hit": chance_hit,
+                           "threshold_frac": threshold_frac, "min_bank_size": provenancepack::MIN_BANK_SIZE},
+                "provenance": {
+                    "started_at": started,
+                    "seeds": [seed],
+                    "command": format!("provenancepack {}", argv.join(" ")),
+                    "hardware": "cpu, single thread",
+                    "wall_s": t0.elapsed().as_secs_f64(),
+                    "data_sources": [{"url": "https://arxiv.org/pdf/2505.23001",
+                        "license": "arXiv preprint, cited only; simulation uses no external data"}]
+                }
+            });
+            if let Some(dir) = out.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(&out, serde_json::to_string_pretty(&doc)? + "\n")?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&doc["false_accusation_rate_by_bank_size"])?
+            );
+        }
         Cmd::Version => println!("provenancepack {}", env!("CARGO_PKG_VERSION")),
     }
     Ok(())
+}
+
+fn utc_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0) as i64;
+    let (days, rem) = (secs.div_euclid(86400), secs.rem_euclid(86400));
+    // civil-from-days (Howard Hinnant)
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z.rem_euclid(146097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }

@@ -1,0 +1,44 @@
+{
+  "always_answer_accusation_rate_by_bank_size": {
+    "10": 1.0,
+    "100": 1.0,
+    "200": 1.0,
+    "25": 1.0,
+    "50": 1.0
+  },
+  "false_accusation_rate_by_bank_size": {
+    "10": 0.08685,
+    "100": 0.0,
+    "200": 0.0,
+    "25": 0.00805,
+    "50": 0.00015
+  },
+  "params": {
+    "chance_hit": 0.05,
+    "min_bank_size": 100,
+    "sizes": [
+      10,
+      25,
+      50,
+      100,
+      200
+    ],
+    "threshold_frac": 0.2,
+    "trials": 20000
+  },
+  "provenance": {
+    "command": "provenancepack bank-sim --seed 7 --trials 20000 --sizes 10,25,50,100,200 --chance-hit 0.05 --threshold-frac 0.2 --out results/745-canary-bank-fpr.json",
+    "data_sources": [
+      {
+        "license": "arXiv preprint, cited only; simulation uses no external data",
+        "url": "https://arxiv.org/pdf/2505.23001"
+      }
+    ],
+    "hardware": "cpu, single thread",
+    "seeds": [
+      7
+    ],
+    "started_at": "2026-11-27T23:57:39Z",
+    "wall_s": 0.06899924
+  }
+}

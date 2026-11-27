@@ -120,7 +120,14 @@ pub async fn emit_sample_async(profile: &MiaProfile, text: &str) -> Result<MiaSa
             source: e,
         })?;
     let body = serde_json::json!({ profile.text_field.clone(): text });
-    let doc = send_with_retry(&client, &profile.url, auth.as_deref(), &body, profile.max_retries).await?;
+    let doc = send_with_retry(
+        &client,
+        &profile.url,
+        auth.as_deref(),
+        &body,
+        profile.max_retries,
+    )
+    .await?;
     let loss_val = doc
         .pointer(&pointer_from_path(&profile.loss_json_path))
         .ok_or(MiaError::MissingField {
@@ -140,13 +147,17 @@ pub async fn emit_sample_async(profile: &MiaProfile, text: &str) -> Result<MiaSa
             let arr_val = doc
                 .pointer(&pointer_from_path(p))
                 .ok_or(MiaError::MissingField { path: p.clone() })?;
-            let arr = arr_val.as_array().ok_or(MiaError::NotANumberArray { path: p.clone() })?;
+            let arr = arr_val
+                .as_array()
+                .ok_or(MiaError::NotANumberArray { path: p.clone() })?;
             if arr.is_empty() {
                 return Err(MiaError::NotANumberArray { path: p.clone() });
             }
             let mut out = Vec::with_capacity(arr.len());
             for item in arr {
-                let v = item.as_f64().ok_or(MiaError::NotANumberArray { path: p.clone() })?;
+                let v = item
+                    .as_f64()
+                    .ok_or(MiaError::NotANumberArray { path: p.clone() })?;
                 if !v.is_finite() {
                     return Err(MiaError::NotFinite { path: p.clone() });
                 }
@@ -310,7 +321,9 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let err = emit_sample_async(&profile(&server.uri(), false), "x").await.expect_err("auth");
+        let err = emit_sample_async(&profile(&server.uri(), false), "x")
+            .await
+            .expect_err("auth");
         assert!(matches!(err, MiaError::AuthRejected { status: 401 }));
     }
 }
